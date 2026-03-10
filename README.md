@@ -1,5 +1,10 @@
 # ComfyUI-LTX-GapFill
 
+> **This node is designed for Safe For Work (SFW) workflows only.**
+> It uses Google Gemini 2.0 Flash, which enforces Google's content policies.
+> Do not use this node with NSFW imagery or prompts — requests containing
+> inappropriate content will be rejected by the Gemini API.
+
 A ComfyUI custom node that brings the **"Fill with Video"** AI prompt suggestion feature from
 [LTX Desktop](https://github.com/Lightricks/LTX-Desktop) into ComfyUI workflows.
 
