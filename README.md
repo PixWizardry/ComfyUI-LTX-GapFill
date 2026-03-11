@@ -1,7 +1,7 @@
 # ComfyUI-LTX-GapFill
 
 > **This node is designed for Safe For Work (SFW) workflows only.**
-> It uses Google Gemini 2.0 Flash, which enforces Google's content policies.
+> It uses Google Gemini 2.5 Flash, which enforces Google's content policies.
 > Do not use this node with NSFW imagery or prompts — requests containing
 > inappropriate content will be rejected by the Gemini API.
 
@@ -21,7 +21,7 @@ A ComfyUI custom node that brings the **"Fill with Video"** AI prompt suggestion
 
 ## What It Does
 
-This node uses **Google Gemini 2.0 Flash** to analyze frames and prompts from two neighboring
+This node uses **Google Gemini 2.5 Flash** to analyze frames and prompts from two neighboring
 video clips, then returns a suggested text prompt describing what should go between them.
 That prompt is wired into any LTX sampler node to generate the bridging video.
 
@@ -38,8 +38,8 @@ transition clip that matches the visual tone of both sides and bridges them smoo
 
 **First frame / last frame situations**
 Only have one side? The node works one-sided too:
-- Supply only `last_frame` to generate something that naturally leads *out of* a clip
-- Supply only `first_frame` to generate something that naturally leads *into* a clip
+- Supply only `clip_before_last_frame` to generate something that naturally leads *out of* a clip
+- Supply only `clip_after_first_frame` to generate something that naturally leads *into* a clip
 - Useful for generating an opening shot, a closing shot, or extending a clip at either end
 
 ---
@@ -56,7 +56,7 @@ Only have one side? The node works one-sided too:
 
 ---
 
-## Node: Gemini Fill Prompt (LTX Bridge)
+## Node: LTX-GapFill Prompt (LTX Video Bridge)
 
 Found under **LTX → Gap Fill** in the node browser.
 
@@ -64,52 +64,167 @@ Found under **LTX → Gap Fill** in the node browser.
 
 | Input | Type | Required | Description |
 |-------|------|----------|-------------|
+| `seed` | INT | Yes | ComfyUI cache-buster only — **not sent to Gemini**. Change to force re-run when all other inputs are unchanged. |
 | `gemini_api_key` | STRING | Yes | Free key from https://aistudio.google.com/app/apikey |
+| `model` | DROPDOWN | Yes | Gemini model to use (all free tier with limitations) |
+| `custom_model` | STRING | No | Override model dropdown with any Gemini model ID — leave blank to use dropdown |
+| `prompt_style` | DROPDOWN | Yes | Controls length and focus of the generated prompt (see Prompt Styles below) |
 | `gap_duration` | FLOAT | Yes | Duration of the gap or desired clip length in seconds |
 | `resize_before_send` | BOOLEAN | Yes | Resize images before sending (default: True, recommended) |
 | `max_size_px` | INT | Yes | Longest edge in pixels when resizing (default: 512) |
-| `last_frame` | IMAGE | Optional | Last frame of the clip BEFORE the gap |
-| `first_frame` | IMAGE | Optional | First frame of the clip AFTER the gap |
+| `clip_before_last_frame` | IMAGE | Optional | Connect the clip **before** the gap — last frame auto-selected |
+| `clip_after_first_frame` | IMAGE | Optional | Connect the clip **after** the gap — first frame auto-selected |
 | `prompt_before` | STRING | Optional | Prompt or description of the clip before the gap |
 | `prompt_after` | STRING | Optional | Prompt or description of the clip after the gap |
+| `custom_system_prompt` | STRING | Optional | **WARNING:** Overrides `prompt_style` entirely. A poorly written prompt wastes tokens and counts against your daily quota. Leave blank to use the dropdown. |
 
-### Output
+### Outputs
 
 | Output | Type | Description |
 |--------|------|-------------|
-| `suggested_prompt` | STRING | Gemini-generated bridge prompt, ready for CLIP Text Encode |
-
----
-
-## Usage
+| `suggested_prompt` | STRING | Gemini-generated bridge prompt — wire into CLIP Text Encode or positive prompt |
+| `report` | STRING | Full run report showing model, system prompt sent, frames, and Gemini response — wire into Show Text |
 
 ### Supplying frames
 
-- **Load Image node** → wire directly into `last_frame` or `first_frame`
-- **VHS LoadVideo** → wire the IMAGE batch output directly — the node auto-selects:
-  - `last_frame` input: picks the **last** frame from the batch
-  - `first_frame` input: picks the **first** frame from the batch
+- **Load Image node** → wire directly into `clip_before_last_frame` or `clip_after_first_frame`
+- **VHS LoadVideo** → wire the full IMAGE batch — the node auto-selects:
+  - `clip_before_last_frame`: picks the **last** frame from the batch
+  - `clip_after_first_frame`: picks the **first** frame from the batch
 
 ### Gap fill / transition (both clips)
 
 ```
-[Load Image A]  ──last_frame──►
-[Load Image B]  ──first_frame──► [Gemini Fill Prompt] ──► [CLIP Text Encode] ──► LTX sampler
-                  gap_duration ──►
+[Load Image A]  ──clip_before_last_frame──►
+[Load Image B]  ──clip_after_first_frame──► [LTX-GapFill Prompt] ──suggested_prompt──► [CLIP Text Encode] ──► LTX sampler
+                  gap_duration ──►                               ──report──────────────► [Show Text]
                   gemini_api_key ──►
 ```
 
 ### One-sided (opening shot, closing shot, or clip extension)
 
 ```
-[Load Image A]  ──last_frame──► [Gemini Fill Prompt] ──► [CLIP Text Encode] ──► LTX sampler
+[Load Image A]  ──clip_before_last_frame──► [LTX-GapFill Prompt] ──suggested_prompt──► [CLIP Text Encode] ──► LTX sampler
                   gap_duration ──►
                   gemini_api_key ──►
 ```
 
-Leave `first_frame` / `last_frame` disconnected as needed. Gemini's system prompt handles
-the one-sided case and generates something that naturally leads into or out of the
-single available shot.
+Leave `clip_after_first_frame` or `clip_before_last_frame` disconnected as needed.
+Gemini handles the one-sided case and generates something that naturally leads into
+or out of the single available shot.
+
+### Re-running without changing inputs
+
+ComfyUI caches node outputs and skips re-running nodes whose inputs haven't changed.
+To force a fresh Gemini call, change the `seed` value. Pair it with a **Randomize**
+seed node to get a new suggestion on every run automatically.
+
+---
+
+## Node: LTX-GapFill Inspector
+
+Found under **LTX → Gap Fill** in the node browser.
+
+A passthrough debug node for prompt engineers. Sits **in-line** before the main node,
+builds and outputs a full payload report showing exactly what will be sent to Gemini —
+before anything is sent. All inputs pass through unchanged.
+
+### Inputs
+
+| Input | Type | Required | Description |
+|-------|------|----------|-------------|
+| `model` | DROPDOWN | Yes | Gemini model — shown in report and passed through |
+| `custom_model` | STRING | Yes | Override model dropdown — leave blank to use dropdown |
+| `prompt_style` | DROPDOWN | Yes | Style to preview in the system prompt section of the report |
+| `gap_duration` | FLOAT | Yes | Gap duration in seconds |
+| `resize_before_send` | BOOLEAN | Yes | Whether images will be resized before sending |
+| `max_size_px` | INT | Yes | Longest edge when resizing |
+| `print_to_console` | BOOLEAN | Yes | Also print report to ComfyUI console (default: False — use Show Text instead) |
+| `clip_before_last_frame` | IMAGE | Optional | Clip before the gap |
+| `clip_after_first_frame` | IMAGE | Optional | Clip after the gap |
+| `prompt_before` | STRING | Optional | Prompt for clip before gap |
+| `prompt_after` | STRING | Optional | Prompt for clip after gap |
+| `custom_system_prompt` | STRING | Optional | Custom system prompt override — shown in report if active |
+
+### Outputs
+
+| Output | Type | Description |
+|--------|------|-------------|
+| `report` | STRING | Full payload report — wire into Show Text to view inside ComfyUI |
+| `active_model` | STRING | Resolved model name — wire into main node's `custom_model` |
+| `prompt_style` | STRING | Selected style — wire into main node's `custom_model` is not needed; pass through for reference |
+| `prompt_before` | STRING | Passthrough |
+| `prompt_after` | STRING | Passthrough |
+| `clip_before_last_frame` | IMAGE | Passthrough |
+| `clip_after_first_frame` | IMAGE | Passthrough |
+
+### What the report shows
+
+```
+╔════════════════════════════════════════════════════════════════╗
+║            LTX-GapFill Inspector — Payload Report              ║
+╠════════════════════════════════════════════════════════════════╣
+║  Model            gemini-2.5-flash                            ║
+║  Endpoint         https://generativelanguage.googleapis.com/  ║
+║  Style            detailed  (max_tokens=1024)                 ║
+║  Gap              5.0 seconds                                 ║
+║  Resize           Yes (max 512px)                             ║
+║  Est. size        ~108 KB                                     ║
+╠════════════════════════════════════════════════════════════════╣
+║  [SYSTEM PROMPT BEING SENT TO GEMINI]                         ║
+║  You are a video production assistant...                      ║
+╠════════════════════════════════════════════════════════════════╣
+║  [SHOT BEFORE (clip_before_last_frame)]                       ║
+║  Frame            1920x1080 → sends 512x288 JPEG ~42 KB      ║
+║  Prompt           A wide shot of a forest at dawn...         ║
+╠════════════════════════════════════════════════════════════════╣
+║  [SHOT AFTER  (clip_after_first_frame)]                       ║
+║  Frame            1920x1080 → sends 512x288 JPEG ~38 KB      ║
+║  Prompt           Close-up of sunlight through leaves...     ║
+╚════════════════════════════════════════════════════════════════╝
+```
+
+### In-line workflow
+
+```
+[Load Image A] ──clip_before_last_frame──►
+[Load Image B] ──clip_after_first_frame──► [LTX-GapFill Inspector] ──report──────────────────────────────► [Show Text]
+                                               ──clip_before_last_frame──►
+                                               ──clip_after_first_frame──► [LTX-GapFill Prompt] ──suggested_prompt──► [CLIP Text Encode]
+                                               ──prompt_before──────────►                       ──report──────────────► [Show Text]
+                                               ──prompt_after───────────►
+                                               ──active_model──► (wire to custom_model on main node)
+```
+
+---
+
+## Prompt Styles
+
+| Style | Length | Focus |
+|-------|--------|-------|
+| `LTX Desktop system prompt` | 2-4 sentences | Verbatim LTX Desktop system prompt — matches the app exactly |
+| `detailed` | 6-10 sentences | Full description: camera motion, lighting, color palette, atmosphere, depth of field |
+| `cinematic` | 5-8 sentences | Cinematographer language: shot type, lens feel, camera movement, lighting ratio, color grade |
+| `narrative` | 5-8 sentences | Story-driven: character action, emotional arc, sensory detail, scene purpose |
+
+**Token budget per style:**
+- `LTX Desktop system prompt` → 256 max tokens
+- all others → 1024 max tokens
+
+---
+
+## Available Models
+
+All models listed below are available on the free tier with usage limitations.
+
+| Model | Notes |
+|-------|-------|
+| `gemini-2.5-flash` | Default — stable, recommended |
+| `gemini-2.5-flash-lite` | Lighter, faster, lower cost |
+| `gemini-3-flash-preview` | Newer generation preview |
+| `gemini-3.1-flash-lite-preview` | Newest, lightest preview |
+
+Use `custom_model` to enter any model ID not in the dropdown — useful when Google releases new models without a node update.
 
 ---
 
